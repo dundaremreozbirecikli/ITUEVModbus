@@ -1,0 +1,4 @@
+Voltage: %73.5
+Voltage: 1811.16
+Voltage: %73.6
+Voltage: 1811.16
