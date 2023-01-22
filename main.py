@@ -1,7 +1,9 @@
 import serial
 import time
 import libscrc
-#import can
+import can
+import os
+import datetime
 
 # Open the serial port and configure it
 ser = serial.Serial()
@@ -14,7 +16,7 @@ ser.timeout = 5
 ser.open()
 
 # Open the CANBUS protocol interface
-# bus = can.Bus(interface='socketcan', channel='vcan0', receive_own_messages=True)
+bus = can.interface.Bus(bustype='socketcan', channel='can0', bitrate=500000)
 
 # Define the data commands to be sent to the device
 vol = [0x01, 0x04, 0x75, 0x46, 0x00, 0x02, 0x8A, 0x12]  # 0x7564
@@ -56,12 +58,17 @@ def crc16(data: bytes):
     return bytes([crc % 256, crc >> 8 % 256])
 
 
-# Open the file for writing
-with open('canlog.txt', 'w') as f:
-    # Create a list to store the voltage values
-    voltage = [85] * 10
-    voltage_i: int = 0
+def findsoc(input_voltage, min_voltage, max_voltage):
+    soc = (input_voltage - min_voltage) / (max_voltage - min_voltage) * 100
+    if soc > 100:
+        soc = 100
+    elif soc < 0:
+        soc = 0
+    return round(soc, 2)
 
+
+# Open the file for writing
+with open("/path/to/microSD/values.txt", 'w') as file:
     # Loop indefinitely to retrieve data from the device
     while True:
         # Request and receive the state of voltage data
@@ -76,11 +83,12 @@ with open('canlog.txt', 'w') as f:
             result_vol = 0
             result_vol = result_vol | response_vol[3] << 8
             result_vol = result_vol | response_vol[4]
+            result_vol /= 10
             # Write the state of charge to the file
-            print("Voltage : ", "{:.2f}".format(result_vol/10))
-            f.write("Voltage: %" + str(result_vol/10) + '\n')
-            # message_soh = can.Message(arbitration_id=0x300, is_extended_id=True, data=result_vol/10)
-            # bus.send(message_soh, timeout=0.2)
+            print("Voltage : ", "{:.2f}".format(result_vol))
+            file.write("Voltage: " + str(result_vol) + ';')
+            message_vol = can.Message(arbitration_id=0x300, data=result_vol, is_extended_id=True)
+            bus.send(message_vol)
         time.sleep(1)
 
         # Request and receive the temperature data
@@ -93,33 +101,15 @@ with open('canlog.txt', 'w') as f:
             result_temp = 0
             result_temp = result_temp | response_temp[3] << 8
             result_temp = result_temp | response_temp[4]
-            # f.write("Voltage: " + str(sum(voltage)/10) + '\n')
-            print("Temperature : ", result_temp/1000)
-            # message_vol = can.Message(arbitration_id=0x301, is_extended_id=True, data=result_temp/1000)
-            # bus.send(message_vol, timeout=0.2)
+            result_temp /= 1000
+            print("Temperature : ", result_temp)
+            file.write("Voltage: " + str(result_temp) + ';')
+            message_temp = can.Message(arbitration_id=0x301, data=result_temp, is_extended_id=True)
+            bus.send(message_temp)
         time.sleep(1)
-
-        # Request and receive the state of charge data
-        # ser.write(soc_min)
-        # time.sleep(1)
-        # bytesToRead_soc = ser.inWaiting()
-        # response_soc = ser.read(bytesToRead_soc)
-        # print(response_soc)
-        # response_soc_decoded = libscrc.modbus(response_soc)
-        # if len(response_soc) >= 6:
-        #     result_soh = 0
-        #     result_soh = result_soh | response_soc[3] << 8
-        #     result_soh = result_soh | response_soc[4]
-        # # Write the state of health to the file
-        #     f.write("Temperature:" + str(result_soh/1000) + '\n')
-        #     print("Temperature : ", "{:.2f}".format(result_soh/1000))
-        #     # message_temp = can.Message(arbitration_id=0x302, is_extended_id=True, data=result_soh/1000)
-        #     # bus.send(message_temp, timeout=0.2)
-        # time.sleep(3)
 
         cellVoltageSum = 0
         # Request and receive the cell voltages
-
         ser.write(cells)
         time.sleep(1)
         bytesToRead_cell = ser.inWaiting()
@@ -135,8 +125,17 @@ with open('canlog.txt', 'w') as f:
                 print("Cell ",  "{:.2f}".format(result_vol_cell/1000))
         # Write the average voltage to the file
         cellVoltageSum = cellVoltageSum/20*24
-        f.write("Voltage: " + str(cellVoltageSum) + '\n')
-        print("Voltage from cells: ", "{:.2f}".format(cellVoltageSum/100))
-        # message_vol = can.Message(arbitration_id=0x303, is_extended_id=True, data=result_temp / 1000)
-        # bus.send(message_vol, timeout=0.2)
+        cellVoltageSum /= 100
+        file.write("Voltage: " + str(cellVoltageSum) + ';')
+        print("Voltage from cells: ", "{:.2f}".format(cellVoltageSum))
+        message_voltage_sum = can.Message(arbitration_id=0x302, data=round(cellVoltageSum), is_extended_id=True)
+        bus.send(message_voltage_sum)
         time.sleep(1)
+
+        # Find and send the SOC
+        result_soc = findsoc(cellVoltageSum, 70, 96)  # değerler değiştirilebilir
+        print("SOC: %", result_soc)
+        file.write("SOC: %" + str(result_soc) + '\n')
+        message_soc = can.Message(arbitration_id=0x302, data=result_soc, is_extended_id=True)
+        bus.send(message_soc)
+
