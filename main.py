@@ -108,6 +108,11 @@ with open("/path/to/microSD/values.txt", 'w') as file:
             bus.send(message_temp)
         time.sleep(1)
 
+        # Cell1     Cell2       Cell3       Cell4       Cell5       Cell6
+        # 3 4       7 8         11 12       15 16       19 20       23 24       Module1Temp: 27 28
+        # 43 44     47 48       51 52       55 56       59 60       63 64       Module2Temp: 67 68
+        # 83 84     87 88       91 92       95 96       99 100      103 104     Module3Temp: 107 108
+        # 123 124   127 128     131 132     135 136     139 140     143 144     Module4temp: 147 148
         cellVoltageSum = 0
         # Request and receive the cell voltages
         ser.write(cells)
@@ -116,13 +121,32 @@ with open("/path/to/microSD/values.txt", 'w') as file:
         response_vol_cell = ser.read(bytesToRead_cell)
         print(response_vol_cell)
         response_vol_cell_decoded = libscrc.modbus(response_vol_cell)
-        for i in range(3, 16, 4):
+        i = 3
+        moduleTemp = [] * 4
+        while i < 148:
             if len(response_vol_cell) >= 16:
                 result_vol_cell = 0
                 result_vol_cell = result_vol_cell | response_vol_cell[i] << 8
                 result_vol_cell = result_vol_cell | response_vol_cell[i+1]
-                cellVoltageSum += result_vol_cell/10
-                print("Cell ",  "{:.2f}".format(result_vol_cell/1000))
+                if i == 27:
+                    moduleTemp[1] = result_vol_cell/1000
+                    i += 16
+                elif i == 67:
+                    moduleTemp[2] = result_vol_cell/1000
+                    i += 16
+                elif i == 107:
+                    moduleTemp[3] = result_vol_cell/1000
+                    i += 16
+                elif i == 147:
+                    moduleTemp[4] = result_vol_cell/1000
+                    i += 16
+                else:
+                    cellVoltageSum += result_vol_cell / 10
+                    print("Cell ", "{:.2f}".format(result_vol_cell / 1000))
+                    print("Module Voltage: ", "{:.2f}".format(moduleTemp[1]), "{:.2f}".format(moduleTemp[2]),
+                          "{:.2f}".format(moduleTemp[3]), "{:.2f}".format(moduleTemp[4]))
+                    i += 4
+
         # Write the average voltage to the file
         cellVoltageSum = cellVoltageSum/20*24
         cellVoltageSum /= 100
@@ -138,4 +162,3 @@ with open("/path/to/microSD/values.txt", 'w') as file:
         file.write("SOC: %" + str(result_soc) + '\n')
         message_soc = can.Message(arbitration_id=0x302, data=result_soc, is_extended_id=True)
         bus.send(message_soc)
-
